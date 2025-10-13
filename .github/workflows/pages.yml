@@ -17,53 +17,54 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Vite가 바로 읽도록 ENV 주입
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'pnpm'               # 캐시만 설정, pnpm은 아래에서 설치
+          cache: 'pnpm'
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            apps/**/pnpm-lock.yaml
+            packages/**/pnpm-lock.yaml
 
-      # ✅ pnpm 설치/활성화 (Corepack 대신 이것만 사용)
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-          run_install: false
-
-      # (선택) pnpm 설치 확인
-      - name: Verify pnpm
-        run: pnpm --version && which pnpm
+      # ✅ pnpm 보장 (있으면 버전 출력, 없으면 npm -g로 설치)
+      - name: Ensure pnpm@9 on PATH
+        run: |
+          set -e
+          if command -v pnpm >/dev/null 2>&1; then
+            echo "pnpm exists: $(pnpm -v)"
+          else
+            echo "pnpm missing → installing via npm -g"
+            npm i -g pnpm@9
+            echo "pnpm installed: $(pnpm -v)"
+          fi
+          echo "pnpm path: $(which pnpm)"
 
       - name: Install deps (workspace)
-        run: |
-          if [ -f pnpm-lock.yaml ]; then
-            pnpm install --frozen-lockfile
-          else
-            pnpm install
-          fi
+        run: pnpm install --frozen-lockfile
 
-      - name: Set env (Supabase)
-        env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-        run: |
-          echo "VITE_SUPABASE_URL=${VITE_SUPABASE_URL}" >> $GITHUB_ENV
-          echo "VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}" >> $GITHUB_ENV
-
+      # 앱별로 디렉터리 진입 후 빌드 (filter 이슈 회피)
       - name: Build student
-        run: pnpm --filter "apps/student" build
+        working-directory: apps/student
+        run: pnpm run build
 
       - name: Build admin
-        run: pnpm --filter "apps/admin" build
+        working-directory: apps/admin
+        run: pnpm run build
 
       - name: Assemble Pages artifact
         run: |
           mkdir -p dist-pages/student dist-pages/admin
-          cp -R apps/student/dist/* dist-pages/student/
-          cp -R apps/admin/dist/* dist-pages/admin/
-          echo '<meta http-equiv="refresh" content="0; url=./student/"/>' > dist-pages/index.html
-          echo '<meta http-equiv="refresh" content="0; url=./student/"/>' > dist-pages/404.html
+          if [ -d apps/student/dist ]; then cp -R apps/student/dist/* dist-pages/student/; fi
+          if [ -d apps/admin/dist ]; then cp -R apps/admin/dist/* dist-pages/admin/; fi
+          printf '%s' '<meta http-equiv="refresh" content="0; url=./student/"/>' > dist-pages/index.html
+          cp dist-pages/index.html dist-pages/404.html
 
       - uses: actions/upload-pages-artifact@v3
         with:
