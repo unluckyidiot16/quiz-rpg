@@ -1,0 +1,13 @@
+{
+  "name": "quiz-rpg",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev:student": "pnpm --filter ./apps/student dev",
+    "dev:admin": "pnpm --filter ./apps/admin dev",
+    "build": "pnpm -r --filter \"./apps/*\" build",
+    "clean": "git clean -fdX && pnpm store prune"
+  }
+}
