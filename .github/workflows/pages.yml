@@ -23,17 +23,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'pnpm'
+          cache: 'pnpm'               # 캐시만 설정, pnpm은 아래에서 설치
 
-      - name: Enable Corepack & install pnpm@9
-        run: |
-          corepack enable
-          corepack prepare pnpm@9 --activate
-          pnpm -v
-
+      # ✅ pnpm 설치/활성화 (Corepack 대신 이것만 사용)
       - uses: pnpm/action-setup@v4
         with:
           version: 9
+          run_install: false
+
+      # (선택) pnpm 설치 확인
+      - name: Verify pnpm
+        run: pnpm --version && which pnpm
 
       - name: Install deps (workspace)
         run: |
@@ -52,10 +52,10 @@ jobs:
           echo "VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}" >> $GITHUB_ENV
 
       - name: Build student
-        run: pnpm --filter ./apps/student build
+        run: pnpm --filter "apps/student" build
 
       - name: Build admin
-        run: pnpm --filter ./apps/admin build
+        run: pnpm --filter "apps/admin" build
 
       - name: Assemble Pages artifact
         run: |
