@@ -27,11 +27,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'pnpm'
-          cache-dependency-path: |
-            pnpm-lock.yaml
-            apps/**/pnpm-lock.yaml
-            packages/**/pnpm-lock.yaml
 
       # ✅ pnpm 보장 (있으면 버전 출력, 없으면 npm -g로 설치)
       - name: Ensure pnpm@9 on PATH
