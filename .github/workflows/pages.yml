@@ -56,9 +56,14 @@ jobs:
       - name: Assemble Pages artifact
         run: |
           mkdir -p dist-pages/student dist-pages/admin
-          if [ -d apps/student/dist ]; then cp -R apps/student/dist/* dist-pages/student/; fi
-          if [ -d apps/admin/dist ]; then cp -R apps/admin/dist/* dist-pages/admin/; fi
-          printf '%s' '<meta http-equiv="refresh" content="0; url=./student/"/>' > dist-pages/index.html
+          cp -R apps/student/dist/* dist-pages/student/
+          cp -R apps/admin/dist/* dist-pages/admin/
+
+          # 리포 이름(ex: quiz-rpg) 추출
+          REPO_NAME="${GITHUB_REPOSITORY##*/}"
+
+          # ✅ 절대경로로 리다이렉트 (상대경로 금지!)
+          echo "<meta http-equiv=\"refresh\" content=\"0; url=/${REPO_NAME}/student/\" />" > dist-pages/index.html
           cp dist-pages/index.html dist-pages/404.html
 
       - uses: actions/upload-pages-artifact@v3
