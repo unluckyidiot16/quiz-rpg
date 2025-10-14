@@ -3,3 +3,4 @@ dist
 .DS_Store
 apps/*/.env*.idea/
 supabase/migrations/.idea/
+supabase/migrations/.DS_Store
