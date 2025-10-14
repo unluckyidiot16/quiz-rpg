@@ -1,0 +1,6 @@
+/* apps/student/src/index.css */
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Noto Sans, sans-serif; }
+button { cursor: pointer; }
