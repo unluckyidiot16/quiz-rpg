@@ -5,6 +5,7 @@ import RoomScoreboard from "./routes/room/RoomScoreboard.jsx";
 import Home from "./routes/Home.jsx";          // ⬅ 추가
 import NotFound from "./routes/NotFound.jsx";  // ⬅ 추가
 import "./index.css";
+import RoomControl from "./routes/teacher/RoomControl.jsx";
 
 const router = createBrowserRouter(
     [

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@quiz-rpg/core";
 
@@ -14,25 +14,63 @@ export default function RoomScoreboard() {
     const { roomId } = useParams();
     const [loading, setLoading] = useState(true);
     const [err, setErr] = useState(null);
-    const [sb, setSB] = useState(null); // { room_id, total_q, student_rows:[], per_question:[] }
+    const [sb, setSB] = useState(null);            // { room_id, total_q, student_rows:[], per_question:[] }
+    const [live, setLive] = useState(false);       // 실시간 연결 상태 표시
 
-    useEffect(() => {
-        let cancelled = false;
-        (async () => {
-            setLoading(true); setErr(null);
-            const { data, error } = await supabase.rpc("get_room_scoreboard", { p_room: roomId });
-            if (cancelled) return;
-            if (error) {
-                setErr(error.message || "점수판을 불러오지 못했습니다.");
-            } else {
-                // returns table -> 배열로 옴
-                const one = Array.isArray(data) ? (data[0] ?? null) : data ?? null;
-                setSB(one);
-            }
-            setLoading(false);
-        })();
-        return () => { cancelled = true; };
+    const fetchingRef = useRef(false);             // 과도한 재호출 방지
+    const firstLoadRef = useRef(true);             // 첫 로드에만 스피너
+    const timerRef = useRef();                     // 디바운스 타이머
+
+    const fetchScoreboard = useCallback(async () => {
+        if (fetchingRef.current) return;
+        fetchingRef.current = true;
+        setErr(null);
+        if (firstLoadRef.current) setLoading(true);
+
+        const { data, error } = await supabase.rpc("get_room_scoreboard", { p_room: roomId });
+
+        fetchingRef.current = false;
+        if (error) {
+            setErr(error.message || "점수판을 불러오지 못했습니다.");
+        } else {
+            const one = Array.isArray(data) ? (data[0] ?? null) : data ?? null;
+            setSB(one);
+        }
+        setLoading(false);
+        firstLoadRef.current = false;
     }, [roomId]);
+
+    // 초기 로드
+    useEffect(() => {
+        firstLoadRef.current = true;  // roomId 바뀌면 다시 첫 로드 스피너
+        fetchScoreboard();
+    }, [fetchScoreboard]);
+
+    // Realtime 구독
+    useEffect(() => {
+        if (!roomId) return;
+
+        const ch = supabase
+            .channel(`room_${roomId}_submissions`)
+            .on(
+                "postgres_changes",
+                { event: "*", schema: "quiz", table: "submissions", filter: `room_id=eq.${roomId}` },
+                () => {
+                    clearTimeout(timerRef.current);
+                    timerRef.current = setTimeout(fetchScoreboard, 150); // 디바운스
+                }
+            )
+            .subscribe((status) => {
+                if (status === "SUBSCRIBED") setLive(true);
+                if (status === "CLOSED" || status === "TIMED_OUT" || status === "CHANNEL_ERROR") setLive(false);
+            });
+
+        return () => {
+            clearTimeout(timerRef.current);
+            supabase.removeChannel(ch);
+            // setLive(false)는 status 이벤트로만 제어
+        };
+    }, [roomId, fetchScoreboard]);
 
     if (loading) return <div className="max-w-4xl mx-auto p-6">불러오는 중…</div>;
     if (err) return <div className="max-w-4xl mx-auto p-6 text-red-600">에러: {String(err)}</div>;
@@ -47,17 +85,8 @@ export default function RoomScoreboard() {
                 <h1 className="text-xl font-bold">점수판</h1>
                 <div className="flex items-center gap-3 text-sm text-gray-600">
                     <span>총 문항: {sb.total_q}</span>
-                    <button
-                        onClick={() => {
-                            setLoading(true);
-                            supabase.rpc("get_room_scoreboard", { p_room: roomId }).then(({ data, error }) => {
-                                if (error) setErr(error.message || "점수판을 불러오지 못했습니다.");
-                                else setSB(Array.isArray(data) ? (data[0] ?? null) : data ?? null);
-                                setLoading(false);
-                            });
-                        }}
-                        className="px-2 py-1 rounded border hover:bg-gray-50"
-                    >
+                    <span className={live ? "text-green-600" : "text-gray-400"}>● {live ? "Live" : "Offline"}</span>
+                    <button onClick={fetchScoreboard} className="px-2 py-1 rounded border hover:bg-gray-50">
                         새로고침
                     </button>
                 </div>
