@@ -13,6 +13,12 @@ importers:
       '@quiz-rpg/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@supabase/supabase-js':
+        specifier: ^2.75.0
+        version: 2.75.0
+      dijkstrajs:
+        specifier: ^1.0.3
+        version: 1.0.3
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
@@ -35,6 +41,9 @@ importers:
       '@quiz-rpg/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@supabase/supabase-js':
+        specifier: ^2.75.0
+        version: 2.75.0
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -52,7 +61,7 @@ importers:
   packages/core:
     dependencies:
       '@supabase/supabase-js':
-        specifier: ^2.75.0
+        specifier: ^2.45.4
         version: 2.75.0
 
 packages:

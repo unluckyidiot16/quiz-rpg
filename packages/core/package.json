@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "index.js",
-  "dependencies": {
-    "@supabase/supabase-js": "^2.75.0"
+  "main": "./index.js",
+  "exports": { ".": { "import": "./index.js" } },
+  "peerDependencies": {
+    "@supabase/supabase-js": "^2.45.4"
   }
 }
