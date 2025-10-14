@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { supabase } from '@quiz-rpg/core';
 import QRCode from 'qrcode';
+import AdminAuth from './auth.jsx';
 
 function getStudentUrl(roomId) {
     // dev(5174→5173), prod(/admin/ → /student/) 모두 대응
@@ -13,6 +14,9 @@ function getStudentUrl(roomId) {
 }
 
 export default function App() {
+    const [session, setSession] = useState(null);
+    const [userEmail, setUserEmail] = useState('');
+    
     const [runId, setRunId] = useState('');
     const [roomId, setRoomId] = useState('');
     const [questionId, setQuestionId] = useState('');
@@ -20,6 +24,35 @@ export default function App() {
     const [qrDataUrl, setQrDataUrl] = useState('');
     const [tally, setTally] = useState({ total: 0, correct: 0 });
 
+    // ✅ 세션 감지 (매직링크 콜백 처리 포함)
+    useEffect(() => {
+        let mounted = true;
+
+        const init = async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!mounted) return;
+            setSession(session ?? null);
+            setUserEmail(session?.user?.email ?? '');
+        };
+        init();
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            setSession(session ?? null);
+            setUserEmail(session?.user?.email ?? '');
+        });
+        return () => {
+            mounted = false;
+            subscription.unsubscribe();
+        };
+    }, []);
+
+    // ✅ 로그아웃
+    const signOut = async () => {
+        await supabase.auth.signOut();
+        setMsg('로그아웃 되었습니다.');
+    };
+    
+    
     // 1) Run + Room 생성 (5분)
     const createRunAndRoom = async () => {
         setMsg('방 생성 중...');
@@ -53,29 +86,50 @@ export default function App() {
         setMsg('문항 시드 완료');
     };
 
+    
+    // 집계 RPC 호출
+    async function refreshTally(roomId, setTally) {
+        const { data, error } = await supabase.rpc('get_room_tally', { p_room: roomId });
+        if (!error && data?.[0]) setTally(data[0]);
+    }
+    
     // 3) 점수판 실시간 구독
     useEffect(() => {
         if (!roomId) return;
+
         setTally({ total: 0, correct: 0 });
+        refreshTally(roomId, setTally); // 최초 1회
 
         const ch = supabase
             .channel('score:' + roomId)
-            .on('postgres_changes', {
-                event: 'INSERT',
-                schema: 'quiz',
-                table: 'submissions',
-                filter: `room_id=eq.${roomId}`
-            }, (payload) => {
-                setTally((t) => ({
-                    total: t.total + 1,
-                    correct: t.correct + (payload.new.correct ? 1 : 0)
-                }));
-            })
-            .subscribe();
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',                 // INSERT/UPDATE 모두
+                    schema: 'quiz',
+                    table: 'submissions',
+                    filter: `room_id=eq.${roomId}`,
+                },
+                (payload) => {
+                    console.log('[realtime] change', payload);
+                    refreshTally(roomId, setTally);
+                }
+            )
+            .subscribe((status) => {
+                console.log('[realtime] status:', status); // 기대: 'SUBSCRIBED'
+            });
 
-        return () => { supabase.removeChannel(ch); };
+        return () => {
+            supabase.removeChannel(ch);
+            console.log('[realtime] unsubscribed');
+        };
     }, [roomId]);
 
+
+
+    // ✅ 로그인 안 되어 있으면 로그인 화면으로
+    if (!session) return <AdminAuth />;
+    
     const copyLink = async () => {
         if (!roomId) return;
         const url = getStudentUrl(roomId);

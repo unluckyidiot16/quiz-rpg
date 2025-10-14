@@ -30,7 +30,15 @@ export default function App() {
             p_student_key: studentKey,
             p_answer: answer
         });
-        if (error) return setMsg('제출 실패: ' + error.message);
+        if (error) {
+            // Postgres 중복 에러 코드는 23505
+            if (error.code === '23505') {
+                setMsg('이미 제출했습니다. 같은 방에서는 한 번만 제출할 수 있어요.');
+            } else {
+                setMsg('제출 오류: ' + error.message);
+            }
+            return;
+        }
         const correct = data?.[0]?.correct === true;
         setResult(correct);
         setMsg(correct ? '정답!' : '오답!');

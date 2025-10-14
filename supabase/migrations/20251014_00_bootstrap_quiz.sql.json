@@ -1,0 +1,169 @@
+-- ░░ 초기 설정 ░░
+create schema if not exists quiz;
+create extension if not exists pgcrypto; -- gen_random_uuid()
+
+-- ░░ 테이블 ░░
+-- 질문 원본
+create table if not exists quiz.questions (
+id uuid primary key default gen_random_uuid(),
+stem text not null,                            -- 질문 본문
+choices jsonb not null check (jsonb_typeof(choices) = 'array'), -- [{key,text}...]
+answer_key text not null,                      -- 정답 키 (예: 'A','B'...)
+created_at timestamptz not null default now()
+);
+
+-- 방(퀴즈 세션)
+create table if not exists quiz.rooms (
+id uuid primary key default gen_random_uuid(),
+title text not null,
+created_at timestamptz not null default now()
+);
+
+-- 방-문항 매핑
+create table if not exists quiz.room_questions (
+room_id uuid not null references quiz.rooms(id) on delete cascade,
+question_id uuid not null references quiz.questions(id) on delete cascade,
+sort_order int,                                -- 선택: 명시 정렬
+primary key (room_id, question_id)
+);
+create index if not exists idx_room_questions_room on quiz.room_questions(room_id);
+create unique index if not exists uq_room_questions_order
+on quiz.room_questions(room_id, sort_order) where sort_order is not null;
+
+-- 제출(학생 답안) 저장
+create table if not exists quiz.submissions (
+id bigserial primary key,
+room_id uuid not null references quiz.rooms(id) on delete cascade,
+question_id uuid not null references quiz.questions(id) on delete cascade,
+submitter text not null default 'guest',       -- 추후 QR/학생ID 연동시 대체
+answer text not null,
+is_correct boolean not null,
+solved_ms int,
+submitted_at timestamptz not null default now(),
+unique (room_id, question_id, submitter)
+);
+create index if not exists idx_submissions_room on quiz.submissions(room_id);
+create index if not exists idx_submissions_submitter on quiz.submissions(submitter);
+
+-- ░░ 샘플 데이터 ░░
+-- 방 1개 + 문항 3개 + 매핑
+do $$
+declare
+v_room uuid;
+q1 uuid; q2 uuid; q3 uuid;
+begin
+insert into quiz.rooms(title) values('데모 방') returning id into v_room;
+
+insert into quiz.questions(stem, choices, answer_key) values
+('2 + 2 = ?', '[{"key":"A","text":"3"},{"key":"B","text":"4"},{"key":"C","text":"5"}]'::jsonb, 'B')
+returning id into q1;
+
+insert into quiz.questions(stem, choices, answer_key) values
+('대한민국의 수도는?', '[{"key":"A","text":"서울"},{"key":"B","text":"부산"},{"key":"C","text":"대구"}]'::jsonb, 'A')
+returning id into q2;
+
+insert into quiz.questions(stem, choices, answer_key) values
+('바다의 색은 보통?', '[{"key":"A","text":"초록"},{"key":"B","text":"파랑"},{"key":"C","text":"빨강"}]'::jsonb, 'B')
+returning id into q3;
+
+insert into quiz.room_questions(room_id, question_id, sort_order) values
+(v_room, q1, 1), (v_room, q2, 2), (v_room, q3, 3);
+end $$;
+
+-- ░░ RPC: q번째 문항 조회 (보기만) ░░
+create or replace function quiz.get_room_question(p_room_id uuid, p_q int default 1)
+returns table (
+q int,
+total int,
+room_id uuid,
+question_id uuid,
+stem text,
+choices jsonb
+)
+language sql
+security definer
+set search_path = quiz, public
+as $$
+with ordered as (
+select
+rq.room_id,
+rq.question_id,
+row_number() over (
+order by coalesce(rq.sort_order, rq.question_id::text)  -- 정렬 우선순위
+) as q,
+count(*) over (partition by rq.room_id) as total
+from quiz.room_questions rq
+where rq.room_id = p_room_id
+)
+select
+o.q,
+o.total,
+o.room_id,
+qb.id as question_id,
+qb.stem,
+qb.choices::jsonb
+from ordered o
+join quiz.questions qb on qb.id = o.question_id
+where o.q = greatest(1, least(p_q, o.total));
+$$;
+
+revoke all on function quiz.get_room_question(uuid, int) from public;
+grant execute on function quiz.get_room_question(uuid, int) to anon, authenticated;
+
+-- ░░ RPC: 채점 + 저장 ░░
+-- 프론트 호출 시: rpc('grade_and_store', { room_id, question_id, answer, solved_ms })
+-- 중복 제출 시 UNIQUE(23505) 발생 → 프론트에서 이미 처리 로직 있음
+create or replace function quiz.grade_and_store(
+room_id uuid,
+question_id uuid,
+answer text,
+solved_ms int default 0,
+submitter text default 'guest'                 -- 파라미터 생략 가능(기본 guest)
+)
+returns table (is_correct boolean)
+language plpgsql
+security definer
+set search_path = quiz, public
+as $$
+declare
+correct text;
+ok boolean;
+begin
+select q.answer_key into correct
+from quiz.questions q
+where q.id = grade_and_store.question_id;
+
+if correct is null then
+raise exception 'Question not found for id=%', grade_and_store.question_id;
+end if;
+
+ok := (answer = correct);
+
+insert into quiz.submissions(room_id, question_id, submitter, answer, is_correct, solved_ms)
+values (grade_and_store.room_id, grade_and_store.question_id, coalesce(submitter,'guest'), answer, ok, solved_ms);
+
+return query select ok;
+
+exception
+when unique_violation then
+-- 그대로 23505를 내보내 프론트에서 "이미 제출했어요" 처리하게 둠
+raise unique_violation using message = 'Already submitted for this question.';
+end
+$$;
+
+revoke all on function quiz.grade_and_store(uuid, uuid, text, int, text) from public;
+grant execute on function quiz.grade_and_store(uuid, uuid, text, int, text) to anon, authenticated;
+
+-- ░░ (선택) RLS 정책 - 직접 테이블 접근 막고 RPC만 쓰고 싶을 때 ░░
+-- Supabase 기본은 RLS OFF. 필요시 ON + 제한 권장.
+-- enable RLS
+alter table quiz.questions enable row level security;
+alter table quiz.rooms enable row level security;
+alter table quiz.room_questions enable row level security;
+alter table quiz.submissions enable row level security;
+
+-- 최소 정책: 익명 직접 SELECT/INSERT 금지 (RPC는 security definer라 영향 없음)
+create policy deny_all_questions on quiz.questions for all using (false) with check (false);
+create policy deny_all_rooms on quiz.rooms for all using (false) with check (false);
+create policy deny_all_room_questions on quiz.room_questions for all using (false) with check (false);
+create policy deny_all_submissions on quiz.submissions for all using (false) with check (false);
