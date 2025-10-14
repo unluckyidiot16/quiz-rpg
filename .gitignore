@@ -1,3 +1,5 @@
 node_modules
 dist
 .DS_Store
+apps/*/.env*.idea/
+supabase/migrations/.idea/
