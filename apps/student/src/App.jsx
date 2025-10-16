@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { supabase, getOrCreateStudentKey } from '@quiz-rpg/core';
+import { supabase } from '/Users/macair/Downloads/quiz-rpg/apps/student/src/lib/client';
 
 const DEMO_PROMPT = '3 × 4 = ?';
 const DEMO_CHOICES = ['10','11','12','13']; // 정답=3
