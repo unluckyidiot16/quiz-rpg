@@ -1,56 +1,56 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { supabase } from "@quiz-rpg/core";
+import { supabase } from "../../lib/client";
 
 export default function RoomControl() {
     const { roomId } = useParams();
-    const [state, setState] = useState('idle');
-    const [currentQ, setCurrentQ] = useState(1);
-    const [totalQ, setTotalQ] = useState(0);
-    const [err, setErr] = useState(null);
+    const [state, setState] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [err, setErr] = useState("");
 
     async function refresh() {
+        setErr("");
+        setLoading(true);
         const { data, error } = await supabase.rpc("get_room_progress", { p_room: roomId });
-        if (error) { setErr(error.message); return; }
-        const one = Array.isArray(data) ? (data[0] ?? null) : data ?? null;
-        if (one) { setState(one.state); setCurrentQ(one.current_q); setTotalQ(one.total_q); }
+        if (error) setErr(error.message);
+        const one = Array.isArray(data) ? data[0] : data;
+        setState(one ?? null);
+        setLoading(false);
     }
 
-    useEffect(() => {
-        refresh();
-        const ch = supabase
-            .channel(`room_${roomId}_progress_admin`)
-            .on("postgres_changes",
-                { event: "UPDATE", schema: "quiz", table: "rooms", filter: `id=eq.${roomId}` },
-                () => refresh())
-            .subscribe();
-        return () => { supabase.removeChannel(ch); };
-    }, [roomId]);
+    // 실시간 제거 → 최초 1회만 로드 (필요 시 버튼으로 갱신)
+    useEffect(() => { refresh(); }, [roomId]);
 
-    async function call(fn) {
-        setErr(null);
-        const { data, error } = await supabase.rpc(fn, { p_room: roomId });
-        if (error) { setErr(error.message); return; }
-        const one = Array.isArray(data) ? (data[0] ?? null) : data ?? null;
-        if (one) { setState(one.state); setCurrentQ(one.current_q); setTotalQ(one.total_q); }
+    // (예시) 다음 문항으로 넘기는 액션이 있다면 유지
+    async function nextQuestion() {
+        const { error } = await supabase.rpc("advance_room_question", { p_room: roomId });
+        if (error) setErr(error.message);
+        await refresh();
     }
 
     return (
-        <div className="max-w-xl mx-auto p-6 space-y-4">
-            <h1 className="text-xl font-bold">교사용 진행 제어</h1>
-            {err && <div className="p-3 rounded bg-red-100 text-red-800">{String(err)}</div>}
-            <div className="text-sm text-gray-600">room_id: {roomId}</div>
-            <div className="flex gap-4 items-center">
-                <div className="px-3 py-2 rounded bg-gray-100">상태: <b>{state}</b></div>
-                <div className="px-3 py-2 rounded bg-gray-100">현재 문항: <b>{currentQ}</b> / {totalQ}</div>
+        <div className="p-4 space-y-3">
+            <h1 className="text-lg font-bold">Room Control</h1>
+
+            <div className="flex gap-2">
+                <button onClick={refresh} className="px-3 py-1 rounded border">새로고침</button>
+                <button onClick={nextQuestion} className="px-3 py-1 rounded border">다음 문항</button>
             </div>
-            <div className="flex gap-3">
-                <button onClick={() => call("start_room")} className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-700 text-white">시작</button>
-                <button onClick={() => call("prev_question")} className="px-4 py-2 rounded border hover:bg-gray-50">이전</button>
-                <button onClick={() => call("next_question")} className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-700 text-white">다음</button>
-                <button onClick={() => call("end_room")} className="px-4 py-2 rounded bg-rose-600 hover:bg-rose-700 text-white">종료</button>
-            </div>
-            <p className="text-sm text-gray-500">버튼 클릭 시 rooms가 업데이트되고, 학생 화면은 실시간으로 해당 문항으로 이동합니다.</p>
+
+            {loading ? (
+                <div>불러오는 중…</div>
+            ) : err ? (
+                <div className="text-red-600">{err}</div>
+            ) : !state ? (
+                <div>데이터가 없습니다.</div>
+            ) : (
+                <div className="space-y-1">
+                    <div>상태: <b>{state.state}</b></div>
+                    <div>현재 문항: <b>{state.current_q}</b></div>
+                    <div>오픈: {state.open_at}</div>
+                    <div>마감: {state.close_at}</div>
+                </div>
+            )}
         </div>
     );
 }
